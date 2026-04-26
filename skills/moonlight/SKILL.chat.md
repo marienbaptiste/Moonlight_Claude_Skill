@@ -48,9 +48,11 @@ Once they reply, create the structure programmatically:
 1. **Root page** — title `Moonlighter's Den`, icon `🌙`, body from the **Root page content** section below.
 2. **Resources child page** — title `Resources`, icon `🧰`, body from the **Resources template** section below.
 3. **Changelog child page** — title `Changelog`, icon `📋`, empty body.
-4. **Ideas Database** — created inline on the root page. Schema from the **Ideas Database schema** section below. Title `Ideas Database`, icon `📊`. Pass select options with their colors. For formula properties, pass the `expression` string.
+4. **Ideas Database** — created inline on the root page. **Use the SQL DDL `CREATE TABLE` statement in the "Ideas Database schema (SQL DDL)" section below — VERBATIM.** The Notion `create-database` tool's `schema` parameter takes a SQL DDL string, not JSON. Pass the full CREATE TABLE block as the `schema` parameter, with `title: "Ideas Database"`, icon `📊`, and the parent set to the root page id.
 
-If the database creation fails on a formula property (some Notion MCP versions may not support it), retry without formulas and tell the user: "I created the database but couldn't add the 3 formula properties (RICE Score, Opportunity Score, Verdict). Add them manually using the expressions in the skill spec."
+The schema includes 19 columns: 16 inputs + 3 FORMULA columns (RICE Score, Opportunity Score (/5), Verdict). **Do not omit any columns.** Do not translate the SQL into JSON or rewrite the formulas — pass the string as-is.
+
+If the call fails, paste the exact error message to the user and stop. Do not silently drop columns. The 3 formulas are core to the skill — without them, scores don't compute.
 
 After creation:
 - Confirm to the user with a link to the new root page
@@ -416,81 +418,32 @@ Use as the body when creating the `Resources` page:
 
 ---
 
-## Ideas Database schema
+## Ideas Database schema (SQL DDL)
 
-Pass this to `notion-create-database`. Property order is intentional (Idea + Status, then computed scores, then market sizing, then scoring inputs, then meta). Adapt the call shape to whatever the Notion MCP expects — the field names, types, options, colors, and formula expressions below are the source of truth.
+Pass the SQL DDL `CREATE TABLE` statement below VERBATIM as the `schema` parameter to `notion-create-database`. The Notion MCP tool expects a SQL DDL string here — not JSON. Do not translate, rewrite, or omit columns. The 19 columns include 3 FORMULA columns (RICE Score, Opportunity Score, Verdict) which are critical to the skill — without them, scores don't auto-compute.
 
-```json
-{
-  "title": "Ideas Database",
-  "icon": "📊",
-  "properties": [
-    { "name": "Idea", "type": "title" },
-    {
-      "name": "Status",
-      "type": "select",
-      "options": [
-        { "name": "💡 New", "color": "yellow" },
-        { "name": "🔍 Researching", "color": "blue" },
-        { "name": "✅ Evaluated", "color": "green" },
-        { "name": "🚀 In Progress", "color": "purple" },
-        { "name": "❌ Killed", "color": "red" }
-      ]
-    },
-    {
-      "name": "RICE Score",
-      "type": "formula",
-      "expression": "((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Minimal (1)\", 1, 0)))) * prop(\"Confidence (/1.0)\")) / max(prop(\"Effort (weeks)\"), 1)"
-    },
-    {
-      "name": "Opportunity Score (/5)",
-      "type": "formula",
-      "expression": "round(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, 1))) * prop(\"Confidence (/1.0)\")) / prop(\"Effort (weeks)\")) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) * 100) / 100"
-    },
-    {
-      "name": "Verdict",
-      "type": "formula",
-      "expression": "if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 4, \"🔥 Strong Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3.5, \"🟢 High Conviction\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3, \"✅ Side Bet\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2.5, \"🔶 Conditional Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2, \"🟡 Weak Maybe\", \"🚫 Hard No\")))))"
-    },
-    { "name": "SOM (users/mo)", "type": "number" },
-    { "name": "SAM", "type": "number" },
-    { "name": "TAM", "type": "number" },
-    {
-      "name": "Impact",
-      "type": "select",
-      "options": [
-        { "name": "Minimal (1)", "color": "gray" },
-        { "name": "Significant (2)", "color": "orange" },
-        { "name": "Transformative (3)", "color": "green" }
-      ]
-    },
-    { "name": "Confidence (/1.0)", "type": "number" },
-    { "name": "Effort (weeks)", "type": "number" },
-    { "name": "Moat (/5)", "type": "number" },
-    { "name": "Unfair Advantage (/5)", "type": "number" },
-    { "name": "Revenue Potential (/5)", "type": "number" },
-    { "name": "Time to $10k (months)", "type": "number" },
-    { "name": "Competitive Window (/5)", "type": "number" },
-    {
-      "name": "Category",
-      "type": "select",
-      "options": [
-        { "name": "SaaS", "color": "blue" },
-        { "name": "Marketplace", "color": "purple" },
-        { "name": "Content", "color": "yellow" },
-        { "name": "Tool", "color": "green" },
-        { "name": "Service", "color": "orange" }
-      ]
-    },
-    {
-      "name": "Origin",
-      "type": "select",
-      "options": [
-        { "name": "AI", "color": "gray" },
-        { "name": "Human", "color": "pink" }
-      ]
-    },
-    { "name": "Date Added", "type": "date" }
-  ]
-}
+Column names use double quotes; option values use single quotes; FORMULA expressions are wrapped in single quotes (the Notion formula syntax inside uses double quotes for `prop()` references and string literals — that's correct, no escaping needed).
+
+```sql
+CREATE TABLE (
+  "Idea" TITLE,
+  "Status" SELECT('💡 New':yellow, '🔍 Researching':blue, '✅ Evaluated':green, '🚀 In Progress':purple, '❌ Killed':red),
+  "RICE Score" FORMULA('((prop("SOM (users/mo)") * if(prop("Impact") == "Transformative (3)", 3, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Minimal (1)", 1, 0)))) * prop("Confidence (/1.0)")) / max(prop("Effort (weeks)"), 1)'),
+  "Opportunity Score (/5)" FORMULA('round(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Transformative (3)", 3, if(prop("Impact") == "Significant (2)", 2, 1))) * prop("Confidence (/1.0)")) / prop("Effort (weeks)")) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) * 100) / 100'),
+  "Verdict" FORMULA('if(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Minimal (1)", 1, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Transformative (3)", 3, 0)))) * prop("Confidence (/1.0)")) / if(prop("Effort (weeks)") == 0, 1, prop("Effort (weeks)"))) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) >= 4, "🔥 Strong Go", if(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Minimal (1)", 1, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Transformative (3)", 3, 0)))) * prop("Confidence (/1.0)")) / if(prop("Effort (weeks)") == 0, 1, prop("Effort (weeks)"))) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) >= 3.5, "🟢 High Conviction", if(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Minimal (1)", 1, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Transformative (3)", 3, 0)))) * prop("Confidence (/1.0)")) / if(prop("Effort (weeks)") == 0, 1, prop("Effort (weeks)"))) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) >= 3, "✅ Side Bet", if(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Minimal (1)", 1, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Transformative (3)", 3, 0)))) * prop("Confidence (/1.0)")) / if(prop("Effort (weeks)") == 0, 1, prop("Effort (weeks)"))) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) >= 2.5, "🔶 Conditional Go", if(((((((min(5, (((prop("SOM (users/mo)") * if(prop("Impact") == "Minimal (1)", 1, if(prop("Impact") == "Significant (2)", 2, if(prop("Impact") == "Transformative (3)", 3, 0)))) * prop("Confidence (/1.0)")) / if(prop("Effort (weeks)") == 0, 1, prop("Effort (weeks)"))) / 2000) * 0.35) + (prop("Moat (/5)") * 0.1)) + (prop("Unfair Advantage (/5)") * 0.1)) + (prop("Revenue Potential (/5)") * 0.2)) + (prop("Competitive Window (/5)") * 0.15)) + (max(0, 5 - (prop("Time to $10k (months)") / 6)) * 0.1)) >= 2, "🟡 Weak Maybe", "🚫 Hard No")))))'),
+  "SOM (users/mo)" NUMBER,
+  "SAM" NUMBER,
+  "TAM" NUMBER,
+  "Impact" SELECT('Minimal (1)':gray, 'Significant (2)':orange, 'Transformative (3)':green),
+  "Confidence (/1.0)" NUMBER,
+  "Effort (weeks)" NUMBER,
+  "Moat (/5)" NUMBER,
+  "Unfair Advantage (/5)" NUMBER,
+  "Revenue Potential (/5)" NUMBER,
+  "Time to $10k (months)" NUMBER,
+  "Competitive Window (/5)" NUMBER,
+  "Category" SELECT('SaaS':blue, 'Marketplace':purple, 'Content':yellow, 'Tool':green, 'Service':orange),
+  "Origin" SELECT('AI':gray, 'Human':pink),
+  "Date Added" DATE
+)
 ```

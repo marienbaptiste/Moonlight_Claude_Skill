@@ -59,9 +59,13 @@ Once they reply, create the structure programmatically:
 1. **Root page** — title `Moonlighter's Den`, icon `🌙`, body from `assets/root_page.md`. Title must be plain text — set the emoji via the `icon` field, never embedded in the title.
 2. **Resources child page** — title `Resources`, icon `🧰`, body from `assets/resources_template.md`.
 3. **Changelog child page** — title `Changelog`, icon `📋`, empty body (will be appended to over time).
-4. **Ideas Database** — created inline on the root page. Schema from `assets/ideas_db_schema.json`. Title `Ideas Database`, icon `📊`, properties as defined in the JSON. Pass select options with their colors. For formula properties, pass the `expression` string.
+4. **Ideas Database** — created inline on the root page. **Use the SQL DDL schema in `assets/ideas_db_schema.sql` verbatim.** The Notion `create-database` tool takes a `schema` parameter that expects a `CREATE TABLE` statement (not JSON). Read the `.sql` file and pass its full content as the `schema` parameter, with `title: "Ideas Database"`, icon `📊`, and the parent set to the root page id.
 
-If the database creation fails on a formula property (some Notion MCP versions may not support it), retry without formulas and tell the user: "I created the database but couldn't add the 3 formula properties (RICE Score, Opportunity Score, Verdict). Add them manually in Notion or paste me their formulas and I'll set them up via update."
+The schema includes 19 columns: 16 inputs + 3 FORMULA columns (RICE Score, Opportunity Score (/5), Verdict). **Do not omit any columns.** Do not translate the schema into JSON or rewrite it — pass the SQL DDL string as-is to preserve the formula expressions exactly.
+
+If the call fails, paste the exact error message to the user and stop. Do not silently drop columns or "fall back" to a partial schema. The 3 formulas are core to the skill — without them, scores don't compute.
+
+The `ideas_db_schema.json` file in `assets/` is for documentation only — human-readable reference for the property structure. The `.sql` file is the executable schema.
 
 After creation:
 - Save all four IDs and `schema_version: 1` to `~/.claude/moonlight/config.json`
