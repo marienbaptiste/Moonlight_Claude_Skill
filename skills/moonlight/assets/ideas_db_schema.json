@@ -1,0 +1,77 @@
+{
+  "title": "Ideas Database",
+  "icon": "📊",
+  "schema_version": 1,
+  "_comment": "Schema for the Moonlight Ideas Database. Pass to Notion MCP create-database. Property order: Idea + Status, then computed scores up top, then market sizing, then scoring inputs, then meta. Note: the RICE expression inlined inside Opportunity Score differs slightly from the standalone RICE Score formula (3-way vs 4-way Impact mapping, no effort zero-guard). This matches the original author's setup and is preserved intentionally.",
+  "properties": [
+    { "name": "Idea", "type": "title" },
+    {
+      "name": "Status",
+      "type": "select",
+      "options": [
+        { "name": "💡 New", "color": "yellow" },
+        { "name": "🔍 Researching", "color": "blue" },
+        { "name": "✅ Evaluated", "color": "green" },
+        { "name": "🚀 In Progress", "color": "purple" },
+        { "name": "❌ Killed", "color": "red" }
+      ]
+    },
+    {
+      "name": "RICE Score",
+      "type": "formula",
+      "_note": "Reach (SOM/month) × Impact × Confidence ÷ Effort. Effort guarded with max(Effort, 1) to prevent div-by-zero or negatives. Impact is a Select; mapped 1/2/3 based on option name (defaults to 0 if unset).",
+      "expression": "((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Minimal (1)\", 1, 0)))) * prop(\"Confidence (/1.0)\")) / max(prop(\"Effort (weeks)\"), 1)"
+    },
+    {
+      "name": "Opportunity Score (/5)",
+      "type": "formula",
+      "_note": "Composite weighted score, rounded to 2 decimals. Weights: RICE_normalized 0.35, Moat 0.1, Unfair Advantage 0.1, Revenue Potential 0.2, Competitive Window 0.15, Time-to-$10k inverted 0.1. RICE normalized as min(5, RICE/2000). The RICE expression is inlined here (not referencing prop(\"RICE Score\")). Note: Impact mapping defaults to 1 (not 0) and Effort is not guarded — minor divergence from the standalone RICE Score formula above.",
+      "expression": "round(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, 1))) * prop(\"Confidence (/1.0)\")) / prop(\"Effort (weeks)\")) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) * 100) / 100"
+    },
+    {
+      "name": "Verdict",
+      "type": "formula",
+      "_note": "6-tier recommendation based on Opportunity Score thresholds: ≥4 Strong Go, ≥3.5 High Conviction, ≥3 Side Bet, ≥2.5 Conditional Go, ≥2 Weak Maybe, else Hard No. Opportunity expression is inlined (verbatim from live workspace).",
+      "expression": "if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 4, \"🔥 Strong Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3.5, \"🟢 High Conviction\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3, \"✅ Side Bet\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2.5, \"🔶 Conditional Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2, \"🟡 Weak Maybe\", \"🚫 Hard No\")))))"
+    },
+    { "name": "SOM (users/mo)", "type": "number" },
+    { "name": "SAM", "type": "number" },
+    { "name": "TAM", "type": "number" },
+    {
+      "name": "Impact",
+      "type": "select",
+      "options": [
+        { "name": "Minimal (1)", "color": "gray" },
+        { "name": "Significant (2)", "color": "orange" },
+        { "name": "Transformative (3)", "color": "green" }
+      ]
+    },
+    { "name": "Confidence (/1.0)", "type": "number" },
+    { "name": "Effort (weeks)", "type": "number" },
+    { "name": "Moat (/5)", "type": "number" },
+    { "name": "Unfair Advantage (/5)", "type": "number" },
+    { "name": "Revenue Potential (/5)", "type": "number" },
+    { "name": "Time to $10k (months)", "type": "number" },
+    { "name": "Competitive Window (/5)", "type": "number" },
+    {
+      "name": "Category",
+      "type": "select",
+      "options": [
+        { "name": "SaaS", "color": "blue" },
+        { "name": "Marketplace", "color": "purple" },
+        { "name": "Content", "color": "yellow" },
+        { "name": "Tool", "color": "green" },
+        { "name": "Service", "color": "orange" }
+      ]
+    },
+    {
+      "name": "Origin",
+      "type": "select",
+      "options": [
+        { "name": "AI", "color": "gray" },
+        { "name": "Human", "color": "pink" }
+      ]
+    },
+    { "name": "Date Added", "type": "date" }
+  ]
+}

@@ -1,0 +1,359 @@
+---
+name: moonlight
+description: "Ideation-to-evaluation pipeline. Takes raw ideas, runs intake interviews + market research + multi-agent evaluation, and produces ranked, sourced executive summaries in the user's Notion workspace."
+---
+
+# Moonlight Skill
+
+Moonlight is a structured ideation-to-evaluation pipeline. It takes raw ideas, interviews the user, researches the market, runs multi-agent evaluation, and produces ranked, sourced executive summaries in Notion.
+
+The skill is **portable across users** — no hardcoded workspace IDs. On first run, it discovers or creates the workspace structure inside the user's own Notion. All IDs are cached in a per-user config so subsequent runs are zero-setup.
+
+---
+
+## Prerequisites
+
+The user must have the **Notion connector** authorized in Claude (so `notion-fetch`, `notion-search`, `notion-create-pages`, `notion-create-database`, `notion-update-page`, `notion-update-data-source` are available). If these tools aren't available, stop and tell the user how to enable Notion in their Claude client, then retry.
+
+---
+
+## Phase 0: Resolve Workspace (run on every invocation, exit early when possible)
+
+Before doing anything the user asked for, ensure you know the workspace IDs. The config lives at `~/.claude/moonlight/config.json` (POSIX) / `%USERPROFILE%\.claude\moonlight\config.json` (Windows).
+
+### Step 0.1 — Try config first
+
+Read the config file. If it exists and has all four IDs (`root_page_id`, `resources_page_id`, `changelog_page_id`, `ideas_db_id`) and `schema_version`, you're done — proceed to the user's actual request.
+
+Config shape:
+```json
+{
+  "schema_version": 1,
+  "root_page_id": "...",
+  "resources_page_id": "...",
+  "changelog_page_id": "...",
+  "ideas_db_id": "..."
+}
+```
+
+### Step 0.2 — Search the workspace
+
+If config is missing or incomplete, run `notion-search` for `"Moonlighter's Den"` (page title). If a page is found:
+
+1. Fetch it with `notion-fetch` to enumerate children
+2. Identify the Resources page (icon 🧰 or title "Resources"), Changelog page (icon 📋 or title "Changelog"), and Ideas Database (inline database)
+3. Extract their IDs (and the data source ID for the database — it's the `collection://` URL inside the `<database>` tag)
+4. Write the config file
+5. Proceed to user's request
+
+### Step 0.3 — Onboard (create the structure)
+
+If nothing is found in the workspace, ask the user:
+
+> "I don't see a Moonlight workspace in your Notion yet. Where should I create it?
+> Paste a Notion page URL to use as the parent, or reply `root` to create at the workspace root.
+> I will only create new pages — I will not modify any existing content."
+
+Once they reply, create the structure programmatically:
+
+1. **Root page** — title `Moonlighter's Den`, icon `🌙`, body from `assets/root_page.md`. Title must be plain text — set the emoji via the `icon` field, never embedded in the title.
+2. **Resources child page** — title `Resources`, icon `🧰`, body from `assets/resources_template.md`.
+3. **Changelog child page** — title `Changelog`, icon `📋`, empty body (will be appended to over time).
+4. **Ideas Database** — created inline on the root page. Schema from `assets/ideas_db_schema.json`. Title `Ideas Database`, icon `📊`, properties as defined in the JSON. Pass select options with their colors. For formula properties, pass the `expression` string.
+
+If the database creation fails on a formula property (some Notion MCP versions may not support it), retry without formulas and tell the user: "I created the database but couldn't add the 3 formula properties (RICE Score, Opportunity Score, Verdict). Add them manually in Notion or paste me their formulas and I'll set them up via update."
+
+After creation:
+- Save all four IDs and `schema_version: 1` to `~/.claude/moonlight/config.json`
+- Confirm to the user with a link to the new root page
+- Append a Changelog entry: `## [YYYY-MM-DD] Workspace initialized` with type `Setup`
+- Proceed to the user's original request
+
+### Step 0.4 — Schema migrations (future)
+
+If `config.schema_version` is less than the current schema version (in `assets/ideas_db_schema.json`), run any defined migration steps before continuing. (No migrations defined yet — this is a forward-compatibility hook.)
+
+---
+
+## Workflow: Handling /moonlight Requests
+
+After Phase 0 completes, detect the request type and act:
+
+| Request type | Action |
+|---|---|
+| New idea submission | Run Intake Interview → Research → Multi-Agent Eval → Write Summary → Update DB |
+| Evaluate/re-rank existing ideas | Fetch DB → Re-run scoring → Update rankings |
+| Market research on a topic | Run research phase only, report findings |
+| Update resources | Fetch Resources page → guide user through updates |
+| Review pipeline | Fetch DB → summarize current state, flag stale ideas |
+
+**Always fetch before editing.** Notion pages change between sessions — never rely on cached state. When you need any of the four pages/DB, fetch by ID from config.
+
+---
+
+## Phase 1: Intake Interview
+
+When the user submits a new idea, run them through questions until you have enough to evaluate. Ask questions in batches of 2–3, not one at a time. Stop when all critical fields are covered.
+
+### Required fields to capture
+
+**Core**
+- One-line pitch (what is it?)
+- Problem statement (what pain does it solve?)
+- Target user / customer segment
+- How the user discovered this pain point (personal experience, observation, request?)
+
+**Market**
+- Known competitors or alternatives
+- Why existing solutions fail or fall short
+- Willingness to pay (is this a "hair on fire" problem?)
+
+**Execution**
+- Revenue model (SaaS, one-time, marketplace, ads, etc.)
+- MVP scope — what's the absolute minimum to validate?
+- Tech stack preferences or constraints
+- Time the user can dedicate (hours/week)
+
+**Ambition**
+- Target scale (lifestyle biz, venture-scale, side income?)
+- Any unfair advantage (domain expertise, existing audience, proprietary data?)
+
+### Adaptive questioning
+- If the user gives a detailed pitch, skip questions they've already answered
+- If the idea is vague, ask more probing questions to sharpen it
+- Always confirm the final captured summary before proceeding
+
+### Resource check
+Fetch the Resources page (id from config). If it's still the unfilled stub, gently prompt the user to fill it in — but don't block evaluation. Factor any constraints found into the evaluation.
+
+---
+
+## Phase 2: Market Research
+
+After intake, conduct live research to validate the pain point. Every claim in the final summary must be grounded.
+
+### Research checklist
+
+1. **Reddit search** — Search relevant subreddits. Look for:
+   - Frequency of complaints (how many posts?)
+   - Emotional intensity (frustrated? desperate? mildly annoyed?)
+   - Existing workarounds people describe
+   - Willingness to pay signals ("I'd pay for...", "shut up and take my money")
+
+2. **Competitor analysis** — Search for existing solutions:
+   - Direct competitors (same problem, same approach)
+   - Indirect competitors (same problem, different approach)
+   - Pricing tiers, reviews, complaints
+   - Gaps in their offerings
+
+3. **Market sizing** — Estimate TAM, SAM, SOM:
+   - **TAM** — total addressable market (industry/category size)
+   - **SAM** — serviceable addressable market (segment you can realistically reach)
+   - **SOM** — serviceable obtainable market in users/month (what's realistic in year 1)
+   - Use industry reports, competitor public numbers, adjacent market data when niche is too small for direct data
+
+4. **Technical feasibility signals** — Search for:
+   - Open-source tools/APIs that could accelerate development
+   - Technical barriers others have encountered
+   - Cost of key infrastructure (APIs, hosting, data)
+
+### Research standards
+- Use `web_search` and `web_fetch` for every claim
+- Record the source URL for every datapoint
+- Note the date of each source
+- If a claim can't be sourced, mark it as `[UNVERIFIED]` and flag it
+
+---
+
+## Phase 3: Multi-Agent Evaluation
+
+Run the idea through 4 expert perspectives. Each agent produces a structured assessment.
+
+### Agent 1: Business Analyst 📊
+Evaluate:
+- **TAM / SAM / SOM**: market sizing in dollars and users/month, sourced
+- **Impact** (1–3): Minimal, Significant, Transformative
+- **Revenue potential** (1–5): 1=<$1k/mo ceiling, 3=$5–20k/mo, 5=$100k+/mo
+- **Time to first $10k**: months, factoring user's available time
+- **Market timing**: is this the right moment? (growing trend, regulatory change, tech enabler?)
+- **Competitive window** (1–5): how long before incumbents copy or new entrants saturate
+
+Output: 3–5 bullet assessment with scores and sources.
+
+### Agent 2: CTO 🏗️
+Evaluate:
+- **Confidence** (0.5 / 0.8 / 1.0): technical feasibility — speculative / reasonable / high confidence with strong data
+- **Effort (weeks)**: person-weeks for MVP, given user's skill level
+- **Skill fit/gap**: what user can build vs. what requires hiring/learning
+- **Tech risk**: any hard technical unknowns?
+- **Time to market**: calendar weeks to a usable MVP
+- **Scalability**: will the architecture hold if it works?
+
+Output: 3–5 bullet assessment with effort estimates and skill gap callouts.
+
+### Agent 3: CPO 📋
+Evaluate:
+- **MVP definition**: smallest thing that validates the hypothesis
+- **User journey**: key touchpoints from discovery to retention
+- **Rollout plan**: Phase 1 (validate) → Phase 2 (grow) → Phase 3 (monetize)
+- **Key metrics**: what to measure at each phase
+- **Timeline**: week-by-week for Phase 1, month-by-month for Phases 2–3
+
+Output: phased plan, 1 page max.
+
+### Agent 4: Marketing Expert 📣
+Evaluate:
+- **Positioning**: one-line positioning statement
+- **Channel strategy**: top 3 channels ranked by expected ROI for this idea
+- **Launch plan**: pre-launch, launch week, post-launch
+- **Content strategy**: what content validates demand before building?
+- **Campaign effort**: hours/week and budget needed
+- **Mock assets**: describe (don't generate) 2–3 key marketing assets — landing page headline, ad copy angle, social post hook
+
+Output: channel-ranked plan with effort estimates.
+
+---
+
+## Phase 4: Scoring & Ranking
+
+The Notion database has three formula properties that compute scores from the inputs you write:
+
+- **RICE Score** — formula in Notion, derived from `SOM (users/mo)`, `Impact`, `Confidence (/1.0)`, `Effort (weeks)`
+- **Opportunity Score (/5)** — composite weighted score combining RICE, Moat, Unfair Advantage, Revenue Potential, Time to $10k
+- **Verdict** — `🟢 Go` / `🟡 Investigate` / `🔴 Kill` based on Opportunity Score thresholds
+
+You write the **inputs**; Notion computes the scores. Inputs to capture per idea:
+
+| Input | Type | Scale / Notes |
+|---|---|---|
+| TAM | Number | Total addressable market ($) |
+| SAM | Number | Serviceable addressable market ($) |
+| SOM (users/mo) | Number | Serviceable obtainable market — users/month, year 1 realistic |
+| Impact | Select | `Minimal (1)`, `Significant (2)`, `Transformative (3)` |
+| Confidence (/1.0) | Number | 0.5 (speculative), 0.8 (reasonable), 1.0 (strong data) |
+| Effort (weeks) | Number | Person-weeks for MVP |
+| Moat (/5) | Number | Defensibility: 1=none, 5=deep (network effects, data, proprietary tech) |
+| Unfair Advantage (/5) | Number | User's specific edge: 1=none, 5=massive |
+| Revenue Potential (/5) | Number | 1=<$1k/mo ceiling, 5=$100k+/mo |
+| Time to $10k (months) | Number | Estimated calendar months to $10k cumulative revenue |
+| Competitive Window (/5) | Number | 1=incumbents will crush, 5=long defensible window |
+
+If the formula columns are unset (e.g., they failed to create during onboarding), compute the scores yourself in the executive summary text and tell the user to add the formulas.
+
+---
+
+## Phase 5: Write to Notion
+
+### Per-idea page
+
+Each idea is a row in the Ideas Database. Set all input properties listed above. The formula properties auto-compute. Also set:
+- **Idea** (title) — short noun phrase (the one-line pitch becomes the page body, not the title)
+- **Status** — start with `💡 New`, move to `🔍 Researching` during research, `✅ Evaluated` after summary written
+- **Origin** — `AI` or `Human` based on who proposed it
+- **Category** — pick the closest fit
+- **Date Added** — today
+
+### Executive summary (page body)
+
+Each idea's row has a child page body — write the executive summary there.
+
+```markdown
+**One-line pitch:** [pitch]
+**Submitted:** [date]
+**Status:** [status]
+
+---
+
+## The Problem
+[2–3 sentences. What's broken, for whom, and why it matters. Every claim sourced.]
+
+## Market Validation
+[Key findings from Reddit/search research. Quotes from real users (anonymized). Competitor gaps. All sourced.]
+
+## Solution & MVP
+[What to build first. Why this scope. What it deliberately excludes.]
+
+## Market Sizing
+| | Value | Source |
+|---|---|---|
+| TAM | $X | [url] |
+| SAM | $Y | [url] |
+| SOM | Z users/mo | [reasoning] |
+
+## Scoring Inputs
+| Input | Value | Rationale |
+|---|---|---|
+| Impact | [1-3] | [reasoning] |
+| Confidence | [0.5-1.0] | [reasoning] |
+| Effort (weeks) | [n] | [reasoning] |
+| Moat | [1-5] | [reasoning] |
+| Unfair Advantage | [1-5] | [reasoning] |
+| Revenue Potential | [1-5] | [reasoning] |
+| Time to $10k (months) | [n] | [reasoning] |
+| Competitive Window | [1-5] | [reasoning] |
+
+## Expert Assessments
+
+### Business Analyst
+[3–5 bullets]
+
+### CTO
+[3–5 bullets]
+
+### CPO — Rollout Plan
+[Phase 1/2/3 summary, key milestones]
+
+### Marketing
+[Channel strategy, launch plan, effort estimate]
+
+## Risks & Mitigations
+[Top 3 risks, each with a mitigation]
+
+## Verdict
+[2–3 sentences. Go/no-go recommendation with reasoning. Should align with the Verdict formula output.]
+
+---
+*Sources: [numbered list of all URLs referenced]*
+```
+
+### Length & tone rules (non-negotiable)
+- Executive summary: 1–2 pages max (~500–1000 words). No exceptions.
+- No filler: ban "It's worth noting", "Leveraging", "Seamlessly", "In today's landscape", "This ensures", "comprehensive solution"
+- Every factual claim needs a source. No source = `[UNVERIFIED]` tag.
+- Direct, opinionated. If an idea is weak, say so. Don't hedge everything.
+- Tables over prose for structured data.
+- No nested bullets deeper than 2 levels.
+
+---
+
+## Changelog Management
+
+After every meaningful change, fetch then prepend to the Changelog page (id from config):
+
+```markdown
+## [YYYY-MM-DD] <Change Title>
+**Type:** [Setup | New Idea | Evaluation | Re-rank | Resource Update | Cleanup]
+**Pages affected:** <list>
+
+<Description>
+```
+
+Newest entries first. Fetch before writing.
+
+---
+
+## Important Rules
+
+1. **Always run Phase 0 first.** Never assume IDs — read config or discover/create.
+2. **Always fetch before editing** — Notion pages change between sessions.
+3. **Always log to Changelog** — every change, no matter how small.
+4. **Never fabricate market data** — if you can't find it, say so.
+5. **Source everything** — URL + date for every factual claim.
+6. **Respect the 1–2 page limit** — ruthlessly cut fluff.
+7. **Ask before killing ideas** — never archive without user confirmation.
+8. **Resources page is context** — always check it before evaluating.
+9. **Be opinionated** — the user wants honest signal, not diplomatic hedging.
+10. **Create missing structure** — if the DB or pages don't exist, run Phase 0 onboarding.
+11. **Rank the database** — after every new evaluation, re-sort by Opportunity Score.
+12. **Icons go on the page, not in the title** — set emoji via the `icon` field only. Titles must be plain text (e.g., `icon: "📊"`, `title: "Ideas Database"` — never `title: "📊 Ideas Database"`). Applies to all page creation and updates.
+13. **Never modify the user's existing Notion content during onboarding** — only create new pages under the parent they specified.
