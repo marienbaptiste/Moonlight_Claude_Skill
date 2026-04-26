@@ -18,9 +18,14 @@ Every claim is sourced. Verdict is `🟢 Go` / `🟡 Investigate` / `🔴 Kill`.
 
 ## Install
 
+Run these two slash commands inside Claude Code:
+
 ```
-claude plugin install <this-repo-url>
+/plugin marketplace add marienbaptiste/Moonlight_Claude_Skill
+/plugin install moonlight@marienbaptiste
 ```
+
+The first command registers the GitHub repo as a plugin marketplace. The second installs the `moonlight` plugin from it.
 
 ## Prerequisites
 

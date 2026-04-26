@@ -1,0 +1,13 @@
+{
+  "name": "marienbaptiste",
+  "owner": {
+    "name": "Baptiste Marien"
+  },
+  "plugins": [
+    {
+      "name": "moonlight",
+      "source": ".",
+      "description": "Ideation-to-evaluation pipeline. Turns raw ideas into ranked, sourced executive summaries in your Notion workspace."
+    }
+  ]
+}
