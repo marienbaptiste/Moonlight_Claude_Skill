@@ -85,11 +85,13 @@ After Phase 0 completes, detect the request type and act:
 
 | Request type | Action |
 |---|---|
-| New idea submission | Run Intake Interview → Research → Multi-Agent Eval → Write Summary → Update DB |
-| Evaluate/re-rank existing ideas | Fetch DB → Re-run scoring → Update rankings |
-| Market research on a topic | Run research phase only, report findings |
-| Update resources | Fetch Resources page → guide user through updates |
+| New idea submission | Intake Interview → **Load User Profile from Resources** → Research → Multi-Agent Eval → Write Summary → Update DB |
+| Evaluate/re-rank existing ideas | Fetch DB → **Load User Profile from Resources** → Re-run scoring with current profile → Update rankings |
+| Market research on a topic | **Load User Profile from Resources** → Run research phase only → Report findings (call out user-specific implications) |
+| Update resources | Fetch Resources page → guide user through updates → confirm before save |
 | Review pipeline | Fetch DB → summarize current state, flag stale ideas |
+
+**Resources/User Profile is loaded BEFORE every evaluation, every re-rank, every research run.** Skipping this step produces generic scores that ignore the user's actual constraints. See Phase 1.5 for the load procedure.
 
 **Always fetch before editing.** Notion pages change between sessions — never rely on cached state. When you need any of the four pages/DB, fetch by ID from config.
 
@@ -128,7 +130,28 @@ When the user submits a new idea, run them through questions until you have enou
 - Always confirm the final captured summary before proceeding
 
 ### Resource check
-Fetch the Resources page (id from config). If it's still the unfilled stub, gently prompt the user to fill it in — but don't block evaluation. Factor any constraints found into the evaluation.
+Fetch the Resources page (id from config). If it's still the unfilled stub (placeholders like `[number]` / `[e.g., ...]`), tell the user: *"Your Resources page is empty. Evaluation will use generic assumptions — scores will be less tailored. Want to fill it in now (5 min) or proceed?"* Wait for their answer. Don't block; their choice.
+
+---
+
+## Phase 1.5: Load User Profile (mandatory before evaluation)
+
+Before Phase 3 runs, extract a structured **User Profile** from the Resources page content. This is the one source of truth that every agent in Phase 3 will reference. Hold it in conversation context for the rest of the run.
+
+```
+USER PROFILE
+- Technical skills: <list, or "unknown" if blank>
+- Domain expertise: <list, or "unknown">
+- Hours/week available: <number, or "unknown">
+- Duration commitment: <e.g., 3 months, or "unknown">
+- Monthly budget cap: <$, or "unknown">
+- One-time investment cap: <$, or "unknown">
+- Preferred tech stack: <list, or "unknown">
+- Existing audience: <description, or "none">
+- Existing assets: <domains, codebases, datasets, network — or "none">
+```
+
+If a field is "unknown", every agent that depends on it must flag the gap explicitly in its output (e.g., "Effort estimate assumes typical mid-level full-stack capability — actual effort depends on user's skill profile, which is unset"). Don't fabricate values.
 
 ---
 
@@ -173,48 +196,50 @@ After intake, conduct live research to validate the pain point. Every claim in t
 
 Run the idea through 4 expert perspectives. Each agent produces a structured assessment.
 
+**Every agent must explicitly reference the User Profile from Phase 1.5.** If a relevant profile field is "unknown", call it out in the output. Don't silently assume defaults.
+
 ### Agent 1: Business Analyst 📊
 Evaluate:
 - **TAM / SAM / SOM**: market sizing in dollars and users/month, sourced
 - **Impact** (1–3): Minimal, Significant, Transformative
 - **Revenue potential** (1–5): 1=<$1k/mo ceiling, 3=$5–20k/mo, 5=$100k+/mo
-- **Time to first $10k**: months, factoring user's available time
+- **Time to first $10k**: months — **factor in user's `Hours/week available` and `Existing audience` from User Profile** (an existing audience compresses time-to-revenue dramatically)
 - **Market timing**: is this the right moment? (growing trend, regulatory change, tech enabler?)
 - **Competitive window** (1–5): how long before incumbents copy or new entrants saturate
 
-Output: 3–5 bullet assessment with scores and sources.
+Output: 3–5 bullet assessment with scores, sources, and any User Profile gaps that affected the estimate.
 
 ### Agent 2: CTO 🏗️
 Evaluate:
-- **Confidence** (0.5 / 0.8 / 1.0): technical feasibility — speculative / reasonable / high confidence with strong data
-- **Effort (weeks)**: person-weeks for MVP, given user's skill level
-- **Skill fit/gap**: what user can build vs. what requires hiring/learning
+- **Confidence** (0.5 / 0.8 / 1.0): technical feasibility — **drop to 0.5 if user's `Preferred tech stack` and `Technical skills` don't cover what this idea needs**
+- **Effort (weeks)**: person-weeks for MVP — **factor in user's `Hours/week available` (a 30hr/wk user delivers ~2× faster than a 10hr/wk user) AND `Technical skills` (skill gaps add weeks for learning curve or contractor hire)**
+- **Skill fit/gap**: explicitly compare what this idea needs vs. user's `Technical skills`. Name the gap if any. If `Monthly budget cap` is too low to hire for the gap, flag it.
 - **Tech risk**: any hard technical unknowns?
-- **Time to market**: calendar weeks to a usable MVP
+- **Time to market**: calendar weeks to a usable MVP, given user's hours/week
 - **Scalability**: will the architecture hold if it works?
 
-Output: 3–5 bullet assessment with effort estimates and skill gap callouts.
+Output: 3–5 bullet assessment with effort estimates, skill gap callouts, and any User Profile gaps.
 
 ### Agent 3: CPO 📋
 Evaluate:
-- **MVP definition**: smallest thing that validates the hypothesis
+- **MVP definition**: smallest thing that validates the hypothesis — **scope to fit user's `Duration commitment` and `Hours/week available`**
 - **User journey**: key touchpoints from discovery to retention
-- **Rollout plan**: Phase 1 (validate) → Phase 2 (grow) → Phase 3 (monetize)
+- **Rollout plan**: Phase 1 (validate) → Phase 2 (grow) → Phase 3 (monetize) — **timeline must respect user's Duration commitment**
 - **Key metrics**: what to measure at each phase
-- **Timeline**: week-by-week for Phase 1, month-by-month for Phases 2–3
+- **Timeline**: week-by-week for Phase 1, month-by-month for Phases 2–3, calibrated to user's hours/week
 
-Output: phased plan, 1 page max.
+Output: phased plan, 1 page max. Flag if scope can't realistically fit the user's available time.
 
 ### Agent 4: Marketing Expert 📣
 Evaluate:
 - **Positioning**: one-line positioning statement
-- **Channel strategy**: top 3 channels ranked by expected ROI for this idea
-- **Launch plan**: pre-launch, launch week, post-launch
+- **Channel strategy**: top 3 channels ranked by expected ROI **given user's `Monthly budget cap` and `Existing audience`** (e.g., if user has 5k newsletter, that's free distribution; if budget cap is $0, paid ads drop in priority)
+- **Launch plan**: pre-launch, launch week, post-launch — **must fit budget cap**
 - **Content strategy**: what content validates demand before building?
-- **Campaign effort**: hours/week and budget needed
+- **Campaign effort**: hours/week and budget needed — **compare to user's `Hours/week available` and `Monthly budget cap`; flag any overrun**
 - **Mock assets**: describe (don't generate) 2–3 key marketing assets — landing page headline, ad copy angle, social post hook
 
-Output: channel-ranked plan with effort estimates.
+Output: channel-ranked plan with effort estimates, budget fit explicitly noted.
 
 ---
 
