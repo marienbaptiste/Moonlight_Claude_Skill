@@ -3,11 +3,13 @@ name: moonlight
 description: "Ideation-to-evaluation pipeline. Takes raw ideas, runs intake interviews + market research + multi-agent evaluation, and produces ranked, sourced executive summaries in the user's Notion workspace."
 ---
 
-# Moonlight Skill
+# Moonlight Skill (claude.ai chat variant)
+
+This is the **single-file, self-contained variant** of Moonlight intended for claude.ai chat (Capabilities → Skills). All assets are inlined below — no filesystem reads. For Claude Code, use `SKILL.md` instead, which reads from `assets/`.
 
 Moonlight is a structured ideation-to-evaluation pipeline. It takes raw ideas, interviews the user, researches the market, runs multi-agent evaluation, and produces ranked, sourced executive summaries in Notion.
 
-The skill is **portable across users** — no hardcoded workspace IDs. On first run, it discovers or creates the workspace structure inside the user's own Notion. All IDs are cached in a per-user config so subsequent runs are zero-setup.
+The skill is **portable across users** — no hardcoded workspace IDs. On every session it discovers or creates the workspace structure inside the user's own Notion via `notion-search`.
 
 ---
 
@@ -17,38 +19,25 @@ The user must have the **Notion connector** authorized in Claude (so `notion-fet
 
 ---
 
-## Phase 0: Resolve Workspace (run on every invocation, exit early when possible)
+## Phase 0: Resolve Workspace (run on every invocation)
 
-Before doing anything the user asked for, ensure you know the workspace IDs. The config lives at `~/.claude/moonlight/config.json` (POSIX) / `%USERPROFILE%\.claude\moonlight\config.json` (Windows).
+claude.ai chat has no persistent filesystem — there is no config file. Re-discover the workspace each session via `notion-search`. The IDs you find are held in conversation memory until the chat ends.
 
-### Step 0.1 — Try config first
+### Step 0.1 — Search for existing workspace
 
-Read the config file. If it exists and has all four IDs (`root_page_id`, `resources_page_id`, `changelog_page_id`, `ideas_db_id`) and `schema_version`, you're done — proceed to the user's actual request.
-
-Config shape:
-```json
-{
-  "schema_version": 1,
-  "root_page_id": "...",
-  "resources_page_id": "...",
-  "changelog_page_id": "...",
-  "ideas_db_id": "..."
-}
-```
-
-### Step 0.2 — Search the workspace
-
-If config is missing or incomplete, run `notion-search` for `"Moonlighter's Den"` (page title). If a page is found:
+Run `notion-search` with query `"Moonlighter's Den"`. If a page with that title is found:
 
 1. Fetch it with `notion-fetch` to enumerate children
-2. Identify the Resources page (icon 🧰 or title "Resources"), Changelog page (icon 📋 or title "Changelog"), and Ideas Database (inline database)
-3. Extract their IDs (and the data source ID for the database — it's the `collection://` URL inside the `<database>` tag)
-4. Write the config file
-5. Proceed to user's request
+2. Identify by icon and title:
+   - **Resources page** — icon 🧰 or title "Resources"
+   - **Changelog page** — icon 📋 or title "Changelog"
+   - **Ideas Database** — inline database (look for the `<database>` tag in the fetched output)
+3. Capture all four IDs in conversation context. The data source ID for the database is the `collection://` URL inside the `<database>` tag — you'll need it to query/update the DB.
+4. Proceed to the user's request.
 
-### Step 0.3 — Onboard (create the structure)
+### Step 0.2 — Onboard if not found
 
-If nothing is found in the workspace, ask the user:
+If `notion-search` returns no match for `"Moonlighter's Den"`, ask the user:
 
 > "I don't see a Moonlight workspace in your Notion yet. Where should I create it?
 > Paste a Notion page URL to use as the parent, or reply `root` to create at the workspace root.
@@ -56,22 +45,19 @@ If nothing is found in the workspace, ask the user:
 
 Once they reply, create the structure programmatically:
 
-1. **Root page** — title `Moonlighter's Den`, icon `🌙`, body from `assets/root_page.md`. Title must be plain text — set the emoji via the `icon` field, never embedded in the title.
-2. **Resources child page** — title `Resources`, icon `🧰`, body from `assets/resources_template.md`.
-3. **Changelog child page** — title `Changelog`, icon `📋`, empty body (will be appended to over time).
-4. **Ideas Database** — created inline on the root page. Schema from `assets/ideas_db_schema.json`. Title `Ideas Database`, icon `📊`, properties as defined in the JSON. Pass select options with their colors. For formula properties, pass the `expression` string.
+1. **Root page** — title `Moonlighter's Den`, icon `🌙`, body from the **Root page content** section below.
+2. **Resources child page** — title `Resources`, icon `🧰`, body from the **Resources template** section below.
+3. **Changelog child page** — title `Changelog`, icon `📋`, empty body.
+4. **Ideas Database** — created inline on the root page. Schema from the **Ideas Database schema** section below. Title `Ideas Database`, icon `📊`. Pass select options with their colors. For formula properties, pass the `expression` string.
 
-If the database creation fails on a formula property (some Notion MCP versions may not support it), retry without formulas and tell the user: "I created the database but couldn't add the 3 formula properties (RICE Score, Opportunity Score, Verdict). Add them manually in Notion or paste me their formulas and I'll set them up via update."
+If the database creation fails on a formula property (some Notion MCP versions may not support it), retry without formulas and tell the user: "I created the database but couldn't add the 3 formula properties (RICE Score, Opportunity Score, Verdict). Add them manually using the expressions in the skill spec."
 
 After creation:
-- Save all four IDs and `schema_version: 1` to `~/.claude/moonlight/config.json`
 - Confirm to the user with a link to the new root page
 - Append a Changelog entry: `## [YYYY-MM-DD] Workspace initialized` with type `Setup`
 - Proceed to the user's original request
 
-### Step 0.4 — Schema migrations (future)
-
-If `config.schema_version` is less than the current schema version (in `assets/ideas_db_schema.json`), run any defined migration steps before continuing. (No migrations defined yet — this is a forward-compatibility hook.)
+**Title rule (always):** set emojis via the `icon` field, never embedded in titles. Title is plain text.
 
 ---
 
@@ -87,7 +73,7 @@ After Phase 0 completes, detect the request type and act:
 | Update resources | Fetch Resources page → guide user through updates |
 | Review pipeline | Fetch DB → summarize current state, flag stale ideas |
 
-**Always fetch before editing.** Notion pages change between sessions — never rely on cached state. When you need any of the four pages/DB, fetch by ID from config.
+**Always fetch before editing.** Notion pages change between sessions — never rely on cached state.
 
 ---
 
@@ -124,7 +110,7 @@ When the user submits a new idea, run them through questions until you have enou
 - Always confirm the final captured summary before proceeding
 
 ### Resource check
-Fetch the Resources page (id from config). If it's still the unfilled stub, gently prompt the user to fill it in — but don't block evaluation. Factor any constraints found into the evaluation.
+Fetch the Resources page (using its ID from Phase 0). If it's still the unfilled stub, gently prompt the user to fill it in — but don't block evaluation. Factor any constraints found into the evaluation.
 
 ---
 
@@ -218,9 +204,9 @@ Output: channel-ranked plan with effort estimates.
 
 The Notion database has three formula properties that compute scores from the inputs you write:
 
-- **RICE Score** — formula in Notion, derived from `SOM (users/mo)`, `Impact`, `Confidence (/1.0)`, `Effort (weeks)`
-- **Opportunity Score (/5)** — composite weighted score combining RICE, Moat, Unfair Advantage, Revenue Potential, Time to $10k
-- **Verdict** — six tiers based on Opportunity Score thresholds: ≥4 `🔥 Strong Go`, ≥3.5 `🟢 High Conviction`, ≥3 `✅ Side Bet`, ≥2.5 `🔶 Conditional Go`, ≥2 `🟡 Weak Maybe`, else `🚫 Hard No`
+- **RICE Score** — `(SOM × Impact × Confidence) / max(Effort, 1)`. Impact is mapped 1/2/3 from the Select option name.
+- **Opportunity Score (/5)** — composite: `min(5, RICE/2000) × 0.35 + Moat × 0.1 + Unfair Advantage × 0.1 + Revenue Potential × 0.2 + Competitive Window × 0.15 + max(0, 5 − months/6) × 0.1`. Rounded to 2 decimals.
+- **Verdict** — six tiers based on Opportunity Score thresholds: ≥4 `🔥 Strong Go`, ≥3.5 `🟢 High Conviction`, ≥3 `✅ Side Bet`, ≥2.5 `🔶 Conditional Go`, ≥2 `🟡 Weak Maybe`, else `🚫 Hard No`.
 
 You write the **inputs**; Notion computes the scores. Inputs to capture per idea:
 
@@ -328,7 +314,7 @@ Each idea's row has a child page body — write the executive summary there.
 
 ## Changelog Management
 
-After every meaningful change, fetch then prepend to the Changelog page (id from config):
+After every meaningful change, fetch then prepend to the Changelog page:
 
 ```markdown
 ## [YYYY-MM-DD] <Change Title>
@@ -344,7 +330,7 @@ Newest entries first. Fetch before writing.
 
 ## Important Rules
 
-1. **Always run Phase 0 first.** Never assume IDs — read config or discover/create.
+1. **Always run Phase 0 first.** Search for the workspace each session — there is no persistent config in claude.ai chat.
 2. **Always fetch before editing** — Notion pages change between sessions.
 3. **Always log to Changelog** — every change, no matter how small.
 4. **Never fabricate market data** — if you can't find it, say so.
@@ -355,5 +341,156 @@ Newest entries first. Fetch before writing.
 9. **Be opinionated** — the user wants honest signal, not diplomatic hedging.
 10. **Create missing structure** — if the DB or pages don't exist, run Phase 0 onboarding.
 11. **Rank the database** — after every new evaluation, re-sort by Opportunity Score.
-12. **Icons go on the page, not in the title** — set emoji via the `icon` field only. Titles must be plain text (e.g., `icon: "📊"`, `title: "Ideas Database"` — never `title: "📊 Ideas Database"`). Applies to all page creation and updates.
+12. **Icons go on the page, not in the title** — set emoji via the `icon` field only. Titles must be plain text.
 13. **Never modify the user's existing Notion content during onboarding** — only create new pages under the parent they specified.
+
+---
+
+# Inlined Assets
+
+The sections below replace the file reads (`assets/*.md` and `assets/*.json`) used in the Claude Code variant. Use them when creating pages and the database in Phase 0 onboarding.
+
+---
+
+## Root page content
+
+Use as the body when creating the `Moonlighter's Den` page:
+
+```markdown
+The ideation pipeline. Submit ideas, validate pain points, score opportunities, ship winners.
+
+> Invoke with `/moonlight` in Claude.
+
+---
+
+## How it works
+
+1. **Submit an idea** — Claude runs a structured intake interview
+2. **Market research** — live validation on Reddit, competitors, market data
+3. **4-agent evaluation** — Business Analyst, CTO, CPO, Marketing Expert
+4. **Score & rank** — RICE + moat, unfair advantage, revenue potential, time to $10k
+5. **Executive summary** — 1–2 pages max, every datapoint sourced
+
+---
+
+## Pages
+
+- 🧰 Resources — your skills, budget, time, tech stack
+- 📋 Changelog — all changes logged here
+- 📊 Ideas Database — ranked pipeline of all ideas
+```
+
+---
+
+## Resources template
+
+Use as the body when creating the `Resources` page:
+
+```markdown
+> Fill this in so Moonlight can factor your constraints into every evaluation.
+
+## Skills & Expertise
+- **Technical:** [e.g., full-stack dev, ML, mobile, design]
+- **Domain:** [e.g., fintech, healthcare, education]
+
+## People
+- [Add LinkedIn / GitHub / portfolio links for collaborators]
+
+## Available Time
+- **Hours/week:** [number]
+- **Duration commitment:** [e.g., 3 months, ongoing]
+
+## Budget
+- **Monthly spend cap:** [e.g., $0, $100, $500]
+- **One-time investment cap:** [e.g., $0, $1000]
+
+## Tech Stack
+- **Preferred:** [e.g., Next.js, Python, Flutter]
+- **Infra:** [e.g., Vercel, AWS, self-hosted]
+
+## Existing Assets
+- **Audience:** [e.g., 5k Twitter, 2k newsletter, none]
+- **Domain names:** [list any you own]
+- **Other:** [anything reusable — codebases, datasets, partnerships, network]
+```
+
+---
+
+## Ideas Database schema
+
+Pass this to `notion-create-database`. Property order is intentional (Idea + Status, then computed scores, then market sizing, then scoring inputs, then meta). Adapt the call shape to whatever the Notion MCP expects — the field names, types, options, colors, and formula expressions below are the source of truth.
+
+```json
+{
+  "title": "Ideas Database",
+  "icon": "📊",
+  "properties": [
+    { "name": "Idea", "type": "title" },
+    {
+      "name": "Status",
+      "type": "select",
+      "options": [
+        { "name": "💡 New", "color": "yellow" },
+        { "name": "🔍 Researching", "color": "blue" },
+        { "name": "✅ Evaluated", "color": "green" },
+        { "name": "🚀 In Progress", "color": "purple" },
+        { "name": "❌ Killed", "color": "red" }
+      ]
+    },
+    {
+      "name": "RICE Score",
+      "type": "formula",
+      "expression": "((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Minimal (1)\", 1, 0)))) * prop(\"Confidence (/1.0)\")) / max(prop(\"Effort (weeks)\"), 1)"
+    },
+    {
+      "name": "Opportunity Score (/5)",
+      "type": "formula",
+      "expression": "round(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Transformative (3)\", 3, if(prop(\"Impact\") == \"Significant (2)\", 2, 1))) * prop(\"Confidence (/1.0)\")) / prop(\"Effort (weeks)\")) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) * 100) / 100"
+    },
+    {
+      "name": "Verdict",
+      "type": "formula",
+      "expression": "if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 4, \"🔥 Strong Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3.5, \"🟢 High Conviction\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 3, \"✅ Side Bet\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2.5, \"🔶 Conditional Go\", if(((((((min(5, (((prop(\"SOM (users/mo)\") * if(prop(\"Impact\") == \"Minimal (1)\", 1, if(prop(\"Impact\") == \"Significant (2)\", 2, if(prop(\"Impact\") == \"Transformative (3)\", 3, 0)))) * prop(\"Confidence (/1.0)\")) / if(prop(\"Effort (weeks)\") == 0, 1, prop(\"Effort (weeks)\"))) / 2000) * 0.35) + (prop(\"Moat (/5)\") * 0.1)) + (prop(\"Unfair Advantage (/5)\") * 0.1)) + (prop(\"Revenue Potential (/5)\") * 0.2)) + (prop(\"Competitive Window (/5)\") * 0.15)) + (max(0, 5 - (prop(\"Time to $10k (months)\") / 6)) * 0.1)) >= 2, \"🟡 Weak Maybe\", \"🚫 Hard No\")))))"
+    },
+    { "name": "SOM (users/mo)", "type": "number" },
+    { "name": "SAM", "type": "number" },
+    { "name": "TAM", "type": "number" },
+    {
+      "name": "Impact",
+      "type": "select",
+      "options": [
+        { "name": "Minimal (1)", "color": "gray" },
+        { "name": "Significant (2)", "color": "orange" },
+        { "name": "Transformative (3)", "color": "green" }
+      ]
+    },
+    { "name": "Confidence (/1.0)", "type": "number" },
+    { "name": "Effort (weeks)", "type": "number" },
+    { "name": "Moat (/5)", "type": "number" },
+    { "name": "Unfair Advantage (/5)", "type": "number" },
+    { "name": "Revenue Potential (/5)", "type": "number" },
+    { "name": "Time to $10k (months)", "type": "number" },
+    { "name": "Competitive Window (/5)", "type": "number" },
+    {
+      "name": "Category",
+      "type": "select",
+      "options": [
+        { "name": "SaaS", "color": "blue" },
+        { "name": "Marketplace", "color": "purple" },
+        { "name": "Content", "color": "yellow" },
+        { "name": "Tool", "color": "green" },
+        { "name": "Service", "color": "orange" }
+      ]
+    },
+    {
+      "name": "Origin",
+      "type": "select",
+      "options": [
+        { "name": "AI", "color": "gray" },
+        { "name": "Human", "color": "pink" }
+      ]
+    },
+    { "name": "Date Added", "type": "date" }
+  ]
+}
+```

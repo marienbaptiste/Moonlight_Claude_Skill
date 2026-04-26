@@ -14,9 +14,13 @@ Run `/moonlight <your idea>` in Claude. The skill will:
 4. Score it (RICE + Opportunity Score with moat, unfair advantage, revenue potential, time-to-revenue, competitive window)
 5. Write a 1–2 page executive summary into a ranked Notion database
 
-Every claim is sourced. Verdict is `🟢 Go` / `🟡 Investigate` / `🔴 Kill`.
+Every claim is sourced. Verdict is one of six tiers: `🔥 Strong Go` · `🟢 High Conviction` · `✅ Side Bet` · `🔶 Conditional Go` · `🟡 Weak Maybe` · `🚫 Hard No` — based on the composite Opportunity Score.
 
 ## Install
+
+Two paths depending on where you use Claude.
+
+### Option A — Claude Code (CLI / desktop / IDE extensions)
 
 Run these two slash commands inside Claude Code:
 
@@ -26,6 +30,16 @@ Run these two slash commands inside Claude Code:
 ```
 
 The first command registers the GitHub repo as a plugin marketplace. The second installs the `moonlight` plugin from it.
+
+### Option B — claude.ai chat (web / mobile)
+
+claude.ai chat doesn't support plugin marketplaces, but it has a Skills feature. Use the inlined single-file variant:
+
+1. Open [`skills/moonlight/SKILL.chat.md`](skills/moonlight/SKILL.chat.md) and copy its full contents
+2. In claude.ai → **Settings** → **Capabilities** (or **Skills**) → **New Skill**
+3. Paste the content and save
+
+The chat variant has all assets inlined (schema JSON, page templates) since chat skills can't read external files. It re-discovers the workspace via `notion-search` each session instead of caching IDs to disk.
 
 ## Prerequisites
 
@@ -70,13 +84,13 @@ To re-run onboarding (e.g., to set up in a different parent page), delete this f
 | Moonlighter's Den | Page (parent) | Root container |
 | Resources | Page | Your constraints — Moonlight reads this on every evaluation |
 | Changelog | Page | Append-only log of skill activity |
-| Ideas Database | Inline database | 18 properties (15 inputs + 3 computed formulas) |
+| Ideas Database | Inline database | 19 properties (16 inputs + 3 computed formulas) |
 
 The Ideas Database includes 3 Notion formula properties: **RICE Score**, **Opportunity Score (/5)**, **Verdict**. They auto-compute from the inputs you (or Claude) write.
 
 ## Limits / known issues
 
-- **Formulas may need verification.** The Notion API doesn't expose formula source code, so the formulas in [`skills/moonlight/assets/ideas_db_schema.json`](skills/moonlight/assets/ideas_db_schema.json) are reasonable defaults derived from the skill's spec. Open the database after first run and confirm the formulas match what you want.
+- **Formulas can be tuned.** The three formulas in [`skills/moonlight/assets/ideas_db_schema.json`](skills/moonlight/assets/ideas_db_schema.json) (RICE, Opportunity Score, Verdict) are copied verbatim from the original author's working setup. Weights, thresholds, and the RICE/2000 normalization are opinionated — feel free to tweak them in your Notion DB after first run.
 - **First-run requires Notion connector.** If you skip the connector authorization, the skill will tell you and stop.
 - **Workspace search depends on visibility.** If your Notion workspace has many pages, the skill searches for `"Moonlighter's Den"` to detect existing setups. If you renamed the root page, edit the config directly.
 
